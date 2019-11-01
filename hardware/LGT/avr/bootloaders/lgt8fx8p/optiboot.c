@@ -198,24 +198,18 @@
 
 #define MAKESTR(a) #a
 #define MAKEVER(a, b) MAKESTR(a*256+b)
+#define MAKEVECT(a) MAKESTR(a/2)
 
 #if defined (__AVR_ATmega328__) || defined(__AVR_ATmega328P__)
 // boot_code : jmp to 0x7400 (start of bootloader)
 asm("	.section .bootv\n"
-    "boot_code: .word 0x940c\n"
-    ".word 0x3a00\n");
-#else
-#if #defined(__AVR_ATmega168__)
-// boot_code : jmp to 0x3c00 (start of bootloader)
-asm("	.section .bootv\n"
-    "boot_code: .word 0x940c\n"
-    ".word 0x1e00\n");
-#endif
+		"boot_code: .word 0x940c\n"
+		".word " MAKEVECT(BOOT_VECT) "\n");
 #endif
 
 asm("  .section .version\n"
-    "optiboot_version:  .word " MAKEVER(OPTIBOOT_MAJVER, OPTIBOOT_MINVER) "\n"
-    "  .section .text\n");
+		"optiboot_version:  .word " MAKEVER(OPTIBOOT_MAJVER, OPTIBOOT_MINVER) "\n"
+		"  .section .text\n");
 
 #include <inttypes.h>
 #include <avr/io.h>
@@ -256,8 +250,8 @@ typedef union {
 #define UART 0
 #endif
 
-#define BAUD_SETTING (( (F_CPU + BAUD_RATE * 4L) / ((BAUD_RATE * 8L))) - 1 )
-#define BAUD_ACTUAL (F_CPU/(8 * ((BAUD_SETTING)+1)))
+#define BAUD_SETTING (( (F_CPU ) / ((BAUD_RATE * 8L))) - 1 )
+#define BAUD_ACTUAL (F_CPU/(8 * ((BAUD_SETTING+1))))
 #define BAUD_ERROR (( 100*(BAUD_RATE - BAUD_ACTUAL) ) / BAUD_RATE)
 
 #if BAUD_ERROR >= 5
@@ -311,18 +305,19 @@ typedef union {
 /* generate any entry or exit code itself. */
 int main(void) __attribute__ ((OS_main)) __attribute__ ((section (".init9")));
 //int main(void) __attribute__ ((naked)) __attribute__ ((section (".init9")));
-void putch(char);
-uint8_t getch(void);
-static inline void getNch(uint8_t); /* "static inline" is a compiler hint to reduce code size */
-void verifySpace();
-static inline void flash_led(uint8_t);
-uint8_t getLen();
-static inline void watchdogReset();
-void watchdogConfig(uint8_t x);
-#ifdef SOFT_UART
-void uartDelay() __attribute__ ((naked));
+static void putch(char);
+static uint8_t getch(void);
+static void getNch(uint8_t);
+static void verifySpace();
+#if LED_START_FLASHES > 0
+static void flash_led(uint8_t);
 #endif
-void appStart(uint8_t rstFlags) __attribute__ ((naked));
+static inline void watchdogReset();
+static void watchdogConfig(uint8_t x);
+#ifdef SOFT_UART
+static void uartDelay() __attribute__ ((naked));
+#endif
+static void appStart(uint8_t rstFlags) __attribute__ ((naked));
 
 /*
  * NRWW memory
@@ -418,386 +413,401 @@ void appStart(uint8_t rstFlags) __attribute__ ((naked));
 
 /* main program starts here */
 int main(void) {
-  uint8_t ch;
-  uint32_t pmask;
+	uint8_t ch;
+	uint32_t pmask;
 
-  /*
-   * Making these local and in registers prevents the need for initializing
-   * them, and also saves space because code no longer stores to memory.
-   * (initializing address keeps the compiler happy, but isn't really
-   *  necessary, and uses 4 bytes of flash.)
-   */
-  register uint16_t address = 0;
-  register uint16_t length;
+	/*
+	 * Making these local and in registers prevents the need for initializing
+	 * them, and also saves space because code no longer stores to memory.
+	 * (initializing address keeps the compiler happy, but isn't really
+	 *  necessary, and uses 4 bytes of flash.)
+	 */
+	register uint16_t address = 0;
+	register uint16_t length;
 
-  // After the zero init loop, this is the first code to run.
-  //
-  // This code makes the following assumptions:
-  //  No interrupts will execute
-  //  SP points to RAMEND
-  //  r1 contains zero
-  //
-  // If not, uncomment the following instructions:
-  // cli();
-  asm volatile ("clr __zero_reg__");
-  SP=RAMEND;  // This is done by hardware reset
+	// After the zero init loop, this is the first code to run.
+	//
+	// This code makes the following assumptions:
+	//  No interrupts will execute
+	//  SP points to RAMEND
+	//  r1 contains zero
+	//
+	// If not, uncomment the following instructions:
+	// cli();
+	asm volatile ("clr __zero_reg__");
+	SP=RAMEND;  // This is done by hardware reset
 
-  // in case we got raw chip
-#if 0
-  pmask = (GUID3 << 24) | (GUID2 << 16) | (GUID1 << 8) | GUID0;
-  if(pmask == 0)
-	OSCCAL = 0xae;
+	// Adaboot no-wait mod
+	ch = MCUSR;
+	MCUSR = 0;
+	//if (ch & (_BV(WDRF) | _BV(BORF) | _BV(PORF)))
+	if (! (ch &  _BV(EXTRF)))
+		appStart(ch);
+
+#if BAUD_RATE==115200
+
+	const uint8_t CAL_V=6;
+	if((uint8_t)RCMCAL>=CAL_V)
+	{
+		RCMCAL -= CAL_V;
+	}
+	else
+	{
+		RCMCAL = 0;
+	}
 #endif
 
-  // Adaboot no-wait mod
-  ch = MCUSR;
-  MCUSR = 0;
-  if (ch & (_BV(WDRF) | _BV(BORF) | _BV(PORF)))
-	appStart(ch);
+	// WDT clock by 32KHz IRC
+	PMCR = 0x80;
+	PMCR = 0x93;
 
-  // WDT clock by 32KHz IRC
-  PMCR = 0x80;
-  PMCR = 0x93;
+	// system clock: 16MHz system clock
+	CLKPR = 0x80;
+	CLKPR = 0x01;
 
-  // system clock: 16MHz system clock
-  CLKPR = 0x80;
-  CLKPR = 0x01;
 
-  // enable 1KB E2PROM (for LGT8F328P)
-  ECCR = 0x80;
-  ECCR = 0x4C;
+#ifdef __LGT8F_SSOP20__
+	// switch usart to PD5/6
+	// switch spss to PB1
+	// switch oc1b to PF3/PD3
+	PMX0 = 0x80;
+	PMX0 = 0x47;
+#endif
+
+#ifndef NOEEPROM
+	// enable 1KB E2PROM (for LGT8F328P)
+	ECCR = 0x80;
+	ECCR = 0x4C;
+#endif
 
 #if LED_START_FLASHES > 0
-  // Set up Timer 1 for timeout counter
-  TCCR1B = _BV(CS12) | _BV(CS10); // div 1024
+	// Set up Timer 1 for timeout counter
+	TCCR1B = _BV(CS12) | _BV(CS10); // div 1024
 #endif
 
 #ifndef SOFT_UART
 #if defined(__AVR_ATmega8__) || defined (__AVR_ATmega32__)
-  UCSRA = _BV(U2X); //Double speed mode USART
-  UCSRB = _BV(RXEN) | _BV(TXEN);  // enable Rx & Tx
-  UCSRC = _BV(URSEL) | _BV(UCSZ1) | _BV(UCSZ0);  // config USART; 8N1
-  UBRRL = (uint8_t)( (F_CPU + BAUD_RATE * 4L) / (BAUD_RATE * 8L) - 1 );
+	UCSRA = _BV(U2X); //Double speed mode USART
+	UCSRB = _BV(RXEN) | _BV(TXEN);  // enable Rx & Tx
+	UCSRC = _BV(URSEL) | _BV(UCSZ1) | _BV(UCSZ0);  // config USART; 8N1
+	UBRRL = (uint8_t)( (F_CPU + BAUD_RATE * 4L) / (BAUD_RATE * 8L) - 1 );
 #else
-  //UART_SRA = _BV(U2X0); //Double speed mode USART0
-  UART_SRB = _BV(RXEN0) | _BV(TXEN0);
-  UART_SRC = _BV(UCSZ00) | _BV(UCSZ01);
-  //UART_SRL = (uint8_t)( F_CPU / (BAUD_RATE * 8L) - 1 );
-  UART_SRL = (uint8_t)( F_CPU / (BAUD_RATE * 16L) - 1 );
+	UART_SRA = _BV(U2X0); //Double speed mode USART0
+	UART_SRB = _BV(RXEN0) | _BV(TXEN0);
+	//UART_SRC = _BV(UCSZ00) | _BV(UCSZ01);
+	UART_SRL = (uint8_t)( F_CPU / (BAUD_RATE * 8L) - 1 );
+	//UART_SRL = (uint8_t)( F_CPU / (BAUD_RATE * 16L) - 1 );
 #endif
 #endif
 
-  // Set up watchdog to trigger after 500ms
-  watchdogConfig(WATCHDOG_32MS);
+	// Set up watchdog to trigger after 500ms
+	watchdogConfig(WATCHDOG_32MS);
 
 #if (LED_START_FLASHES > 0) || defined(LED_DATA_FLASH)
-  /* Set LED pin as output */
-  LED_DDR |= _BV(LED);
+	/* Set LED pin as output */
+	LED_DDR |= _BV(LED);
 #endif
 
 #ifdef SOFT_UART
-  /* Set TX pin as output */
-  UART_DDR |= _BV(UART_TX_BIT);
+	/* Set TX pin as output */
+	UART_DDR |= _BV(UART_TX_BIT);
 #endif
 
 #if LED_START_FLASHES > 0
-  /* Flash onboard LED to signal entering of bootloader */
-  flash_led(LED_START_FLASHES * 2);
+	/* Flash onboard LED to signal entering of bootloader */
+	flash_led(LED_START_FLASHES * 2);
 #endif
 
-  // page erased flag
-  pmask = 0;
+	// page erased flag
+	pmask = 0;
 
-  /* Forever loop */
-  for (;;) {
-    /* get character from UART */
-    ch = getch();
+	/* Forever loop */
+	for (;;) {
+		/* get character from UART */
+		ch = getch();
 
-    if(ch == STK_GET_PARAMETER) {
-      unsigned char which = getch();
-      verifySpace();
-      if (which == 0x82) {
-	/*
-	 * Send optiboot version as "minor SW version"
-	 */
-	putch(OPTIBOOT_MINVER);
-      } else if (which == 0x81) {
-	  putch(OPTIBOOT_MAJVER);
-      } else {
-	/*
-	 * GET PARAMETER returns a generic 0x03 reply for
-         * other parameters - enough to keep Avrdude happy
-	 */
-	putch(0x03);
-      }
-    }
-    else if(ch == STK_SET_DEVICE) {
-      // SET DEVICE is ignored
-      getNch(20);
-    }
-    else if(ch == STK_SET_DEVICE_EXT) {
-      // SET DEVICE EXT is ignored
-      getNch(5);
-    }
-    else if(ch == STK_LOAD_ADDRESS) {
-      // LOAD ADDRESS
-      uint16_t newAddress;
-      newAddress = getch();
-      newAddress = (newAddress & 0xff) | (getch() << 8);
+		if(ch == STK_GET_PARAMETER) {
+			unsigned char which = getch();
+			verifySpace();
+			if (which == 0x82) {
+				/*
+				 * Send optiboot version as "minor SW version"
+				 */
+				putch(OPTIBOOT_MINVER);
+			} else if (which == 0x81) {
+				putch(OPTIBOOT_MAJVER);
+			} else {
+				/*
+				 * GET PARAMETER returns a generic 0x03 reply for
+				 * other parameters - enough to keep Avrdude happy
+				 */
+				putch(0x03);
+			}
+		}
+		else if(ch == STK_SET_DEVICE) {
+			// SET DEVICE is ignored
+			getNch(20);
+		}
+		else if(ch == STK_SET_DEVICE_EXT) {
+			// SET DEVICE EXT is ignored
+			getNch(5);
+		}
+		else if(ch == STK_LOAD_ADDRESS) {
+			// LOAD ADDRESS
+			uint16_t newAddress;
+			newAddress = getch();
+			newAddress = (newAddress & 0xff) | (getch() << 8);
 #ifdef RAMPZ
-      // Transfer top bit to RAMPZ
-      RAMPZ = (newAddress & 0x8000) ? 1 : 0;
+			// Transfer top bit to RAMPZ
+			RAMPZ = (newAddress & 0x8000) ? 1 : 0;
 #endif
-      newAddress += newAddress; // Convert from word address to byte address
-      address = newAddress;
-      verifySpace();
-    }
-    else if(ch == STK_UNIVERSAL) {
-      // UNIVERSAL command is ignored
-      getNch(4);
-      putch(0x00);
-    }
-    /* Write memory, length is big endian and is in bytes */
-    else if(ch == STK_PROG_PAGE) {
-      // PROGRAM PAGE - we support flash programming only, not EEPROM
-      uint8_t *bufPtr;
-      uint8_t bval;
-      uint16_t len;
-      length = (uint16_t)getch() << 8; /* getlen() */
-      length += getch();
-      bval = getch();
+			newAddress += newAddress; // Convert from word address to byte address
+			address = newAddress;
+			verifySpace();
+		}
+		else if(ch == STK_UNIVERSAL) {
+			// UNIVERSAL command is ignored
+			getNch(4);
+			putch(0x00);
+		}
+		/* Write memory, length is big endian and is in bytes */
+		else if(ch == STK_PROG_PAGE) {
+			// PROGRAM PAGE - we support flash programming only, not EEPROM
+			uint8_t *bufPtr;
+			uint8_t bval;
+			uint16_t len;
+			length = (uint16_t)getch() << 8; /* getlen() */
+			length += getch();
+			bval = getch();
 
-      // If we are in RWW section, immediately start page erase
-      //if (address < NRWWSTART) __boot_page_erase_short((uint16_t)(void*)address);
+			// If we are in RWW section, immediately start page erase
+			//if (address < NRWWSTART) __boot_page_erase_short((uint16_t)(void*)address);
 
-      // While that is going on, read in page contents
-      bufPtr = buff;
-      len = length;
-      do *bufPtr++ = getch();
-      while (--len);
+			// While that is going on, read in page contents
+			bufPtr = buff;
+			len = length;
+			do *bufPtr++ = getch();
+			while (--len);
 
-      EEARL = 0; 
-      EEARH = address >> 8;
-      ch = EEARH >> 2;	// 1KB page size
+			EEARL = 0; 
+			EEARH = address >> 8;
+			ch = EEARH >> 2;	// 1KB page size
 
-      if((0 == (pmask & (((uint32_t)1 << ch)))) && bval == 'F') { 
-	pmask |= ((uint32_t)1 << ch);
-      	// do page erase here
-      	EECR = 0x94;
-      	EECR = 0x92;
-      	__asm__ __volatile__ ("nop" ::); 
-	__asm__ __volatile__ ("nop" ::);      
-      }
+			if((0 == (pmask & (((uint32_t)1 << ch)))) && bval == 'F') { 
+				pmask |= ((uint32_t)1 << ch);
+				// do page erase here
+				EECR = 0x94;
+				EECR = 0x92;
+				__asm__ __volatile__ ("nop" ::); 
+				__asm__ __volatile__ ("nop" ::);      
+			}
 
-      // Read command terminator, start reply
-      verifySpace();
+			// Read command terminator, start reply
+			verifySpace();
 
-      // If only a partial page is to be programmed, the erase might not be complete.
-      // So check that here
-      //boot_spm_busy_wait();
-      if (bval == 'E') {
-	  for(len = 0; len < length; len++) {
-	    //if(address >= 1022)
-	 	//break;
-	    EEARL = address++;
-	    EEARH = address >> 8;
-	    EEDR = buff[len];
-	    EECR = 0x04;
-	    EECR = 0x02;
-	  }
-      } else {
+			// If only a partial page is to be programmed, the erase might not be complete.
+			// So check that here
+			//boot_spm_busy_wait();
+			if (bval == 'E') {
+				for(len = 0; len < length; len++) {
+					//if(address >= 1022)
+					//break;
+					EEARL = address++;
+					EEARH = address >> 8;
+					EEDR = buff[len];
+					EECR = 0x04;
+					EECR = 0x02;
+				}
+			} else {
 #ifdef VIRTUAL_BOOT_PARTITION
-	if ((uint16_t)(void*)address == 0) {
-	  // This is the reset vector page. We need to live-patch the code so the
-	  // bootloader runs.
-	  //
-	  // Move RESET vector to WDT vector
-	  rstVect0 = buff[0] | (buff[1] << 8);
-	  rstVect1 = buff[2] | (buff[3] << 8);
-	  wdtVect0 = buff[24] | (buff[25] << 8);
-	  wdtVect1 = buff[26] | (buff[27] << 8);
+				if ((uint16_t)(void*)address == 0) {
+					uint16_t *buff16 = (uint16_t *)buff;
+					// This is the reset vector page. We need to live-patch the code so the
+					// bootloader runs.
+					//
+					// Move RESET vector to WDT vector
+					rstVect0 = buff16[0];
+					rstVect1 = buff16[1];
+					wdtVect0 = buff16[12];
+					wdtVect1 = buff16[13];
 
-	  buff[24] = buff[0];
-	  buff[25] = buff[1];
-	  buff[26] = buff[2];
-	  buff[27] = buff[3];
-	
-	  // Add jump to bootloader at RESET vector
-	  buff[0] = 0x0c;
-	  buff[1] = 0x94; // jmp 
-	  buff[2] = 0x00;
-	  buff[3] = 0x3a; // 0x7400 (0x3a00) 
-	}
+					buff16[12] = buff16[0];
+					buff16[13] = buff16[1];
+
+					// Add jump to bootloader at RESET vector
+					buff16[0] = 0x940c; //JMP
+					buff16[1] = BOOT_VECT/2;
+				}
 #endif
-      	// Write from programming buffer
-	pdword_t wPtr = (pdword_t)buff;
-      	for(length = 0; length < SPM_PAGESIZE; length+=4, wPtr++) {
-	      EEARL = 0; EEDR = wPtr->byte[0];
-	      EEARL = 1; EEDR = wPtr->byte[1];
-	      EEARL = 2; EEDR = wPtr->byte[2];
-	      EEARL = 3; EEDR = wPtr->byte[3];
-	      EEARL = (address + length) & 0xff;
-	      EECR = 0xA4;
-	      EECR = 0xA2;
-	}
-      }
-    }
-    /* Read memory block mode, length is big endian.  */
-    else if(ch == STK_READ_PAGE) {
-      // READ PAGE - we only read flash
-      uint8_t bval;
+				// Write from programming buffer
+				pdword_t wPtr = (pdword_t)buff;
+				for(length = 0; length < SPM_PAGESIZE; length+=4, wPtr++) {
+					EEARL = 0; EEDR = wPtr->byte[0];
+					EEARL = 1; EEDR = wPtr->byte[1];
+					EEARL = 2; EEDR = wPtr->byte[2];
+					EEARL = 3; EEDR = wPtr->byte[3];
+					EEARL = (address + length) & 0xff;
+					EECR = 0xA4;
+					EECR = 0xA2;
+				}
+			}
+		}
+		/* Read memory block mode, length is big endian.  */
+		else if(ch == STK_READ_PAGE) {
+			// READ PAGE - we only read flash
+			uint8_t bval;
 
-      length = getch() << 8;			/* getlen() */
-      length += getch();
-      bval = getch();
+			length = getch() << 8;			/* getlen() */
+			length += getch();
+			bval = getch();
 
-      verifySpace();
+			verifySpace();
 
-      if( bval == 'E') {
-	do {
-	    EEARL = address++;
-	    EEARH = address >> 8;
-	    EECR = 0x01;
-	    __asm__ __volatile__ ("nop" ::);
-	    __asm__ __volatile__ ("nop" ::);
-	    putch(EEDR);
-	} while (--length);
-      } else {
-      	do {
+			if( bval == 'E') {
+				do {
+					EEARL = address++;
+					EEARH = address >> 8;
+					EECR = 0x01;
+					__asm__ __volatile__ ("nop" ::);
+					__asm__ __volatile__ ("nop" ::);
+					putch(EEDR);
+				} while (--length);
+			} else {
+				do {
 #ifdef VIRTUAL_BOOT_PARTITION
-	   // Undo vector patch in bottom page so verify passes
-	   if (address == 0)		ch = rstVect0 & 0xff;
-	   else if (address == 1)	ch = rstVect0 >> 8;
-	   else if (address == 2)	ch = rstVect1 & 0xff;
-	   else if (address == 3)	ch = rstVect1 >> 8;
-	   else if (address == 24)	ch = wdtVect0 & 0xff;
-	   else if (address == 25)	ch = wdtVect0 >> 8;
-	   else if (address == 26)	ch = wdtVect1 & 0xff;
-	   else if (address == 27)	ch = wdtVect1 >> 8;
-	   else {
-	   // read a Flash byte and increment the address
-	#if defined(RAMPZ)
-	   // Since RAMPZ should already be set, we need to use EPLM directly.
-	   // read a Flash and increment the address (may increment RAMPZ)
-	   __asm__ ("elpm %0,Z\n" : "=r" (ch) : "z" (address));
-	#else
-	   // read a Flash byte and increment the address
-	   __asm__ ("lpm %0,Z\n" : "=r" (ch) : "z" (address));
-	   //ch = *((uint8_t *)(0x4000 + address));
-	#endif
+					// Undo vector patch in bottom page so verify passes
+					if (address == 0)		ch = rstVect0 & 0xff;
+					else if (address == 1)	ch = rstVect0 >> 8;
+					else if (address == 2)	ch = rstVect1 & 0xff;
+					else if (address == 3)	ch = rstVect1 >> 8;
+					else if (address == 24)	ch = wdtVect0 & 0xff;
+					else if (address == 25)	ch = wdtVect0 >> 8;
+					else if (address == 26)	ch = wdtVect1 & 0xff;
+					else if (address == 27)	ch = wdtVect1 >> 8;
+					else {
+						// read a Flash byte and increment the address
+#if defined(RAMPZ)
+						// Since RAMPZ should already be set, we need to use EPLM directly.
+						// read a Flash and increment the address (may increment RAMPZ)
+						__asm__ ("elpm %0,Z\n" : "=r" (ch) : "z" (address));
+#else
+						// read a Flash byte and increment the address
+						__asm__ ("lpm %0,Z\n" : "=r" (ch) : "z" (address));
+						//ch = *((uint8_t *)(0x4000 + address));
 #endif
-	   }
-	   address++;
-           putch(ch);
-         } while (--length);
-      }
-    }
+					}
+#endif
+					address++;
+					putch(ch);
+				} while (--length);
+			}
+		}
 
-    /* Get device signature bytes  */
-    else if(ch == STK_READ_SIGN) {
-      // READ SIGN - return what Avrdude wants to hear
-      verifySpace();
-      putch(SIGNATURE_0);
-      putch(SIGNATURE_1);
-      putch(SIGNATURE_2);
-    }
-    else if (ch == STK_LEAVE_PROGMODE) { /* 'Q' */
-      // Adaboot no-wait mod
-      watchdogConfig(WATCHDOG_16MS);
-      verifySpace();
-    }
-    else {
-      // This covers the response to commands like STK_ENTER_PROGMODE
-      verifySpace();
-    }
-    putch(STK_OK);
-  }
+		/* Get device signature bytes  */
+		else if(ch == STK_READ_SIGN) {
+			// READ SIGN - return what Avrdude wants to hear
+			verifySpace();
+			putch(SIGNATURE_0);
+			putch(SIGNATURE_1);
+			putch(SIGNATURE_2);
+		}
+		else if (ch == STK_LEAVE_PROGMODE) { /* 'Q' */
+			// Adaboot no-wait mod
+			watchdogConfig(WATCHDOG_16MS);
+			verifySpace();
+		}
+		else {
+			// This covers the response to commands like STK_ENTER_PROGMODE
+			verifySpace();
+		}
+		putch(STK_OK);
+	}
 }
 
 void putch(char ch) {
 #ifndef SOFT_UART
-  while (!(UART_SRA & _BV(UDRE0)));
-  UART_UDR = ch;
+	while (!(UART_SRA & _BV(UDRE0)));
+	UART_UDR = ch;
 #else
-  __asm__ __volatile__ (
-    "   com %[ch]\n" // ones complement, carry set
-    "   sec\n"
-    "1: brcc 2f\n"
-    "   cbi %[uartPort],%[uartBit]\n"
-    "   rjmp 3f\n"
-    "2: sbi %[uartPort],%[uartBit]\n"
-    "   nop\n"
-    "3: rcall uartDelay\n"
-    "   rcall uartDelay\n"
-    "   lsr %[ch]\n"
-    "   dec %[bitcnt]\n"
-    "   brne 1b\n"
-    :
-    :
-      [bitcnt] "d" (10),
-      [ch] "r" (ch),
-      [uartPort] "I" (_SFR_IO_ADDR(UART_PORT)),
-      [uartBit] "I" (UART_TX_BIT)
-    :
-      "r25"
-  );
+	__asm__ __volatile__ (
+			"   com %[ch]\n" // ones complement, carry set
+			"   sec\n"
+			"1: brcc 2f\n"
+			"   cbi %[uartPort],%[uartBit]\n"
+			"   rjmp 3f\n"
+			"2: sbi %[uartPort],%[uartBit]\n"
+			"   nop\n"
+			"3: rcall uartDelay\n"
+			"   rcall uartDelay\n"
+			"   lsr %[ch]\n"
+			"   dec %[bitcnt]\n"
+			"   brne 1b\n"
+			:
+			:
+			[bitcnt] "d" (10),
+			[ch] "r" (ch),
+			[uartPort] "I" (_SFR_IO_ADDR(UART_PORT)),
+			[uartBit] "I" (UART_TX_BIT)
+			:
+			"r25"
+				);
 #endif
 }
 
 uint8_t getch(void) {
-  uint8_t ch;
+	uint8_t ch;
 
 #ifdef LED_DATA_FLASH
-  LED_PORT ^= _BV(LED);
+	LED_PORT ^= _BV(LED);
 #endif
 
 #ifdef SOFT_UART
-  __asm__ __volatile__ (
-    "1: sbic  %[uartPin],%[uartBit]\n"  // Wait for start edge
-    "   rjmp  1b\n"
-    "   rcall uartDelay\n"          // Get to middle of start bit
-    "2: rcall uartDelay\n"              // Wait 1 bit period
-    "   rcall uartDelay\n"              // Wait 1 bit period
-    "   clc\n"
-    "   sbic  %[uartPin],%[uartBit]\n"
-    "   sec\n"
-    "   dec   %[bitCnt]\n"
-    "   breq  3f\n"
-    "   ror   %[ch]\n"
-    "   rjmp  2b\n"
-    "3:\n"
-    :
-      [ch] "=r" (ch)
-    :
-      [bitCnt] "d" (9),
-      [uartPin] "I" (_SFR_IO_ADDR(UART_PIN)),
-      [uartBit] "I" (UART_RX_BIT)
-    :
-      "r25"
-);
+	__asm__ __volatile__ (
+			"1: sbic  %[uartPin],%[uartBit]\n"  // Wait for start edge
+			"   rjmp  1b\n"
+			"   rcall uartDelay\n"          // Get to middle of start bit
+			"2: rcall uartDelay\n"              // Wait 1 bit period
+			"   rcall uartDelay\n"              // Wait 1 bit period
+			"   clc\n"
+			"   sbic  %[uartPin],%[uartBit]\n"
+			"   sec\n"
+			"   dec   %[bitCnt]\n"
+			"   breq  3f\n"
+			"   ror   %[ch]\n"
+			"   rjmp  2b\n"
+			"3:\n"
+			:
+			[ch] "=r" (ch)
+			:
+			[bitCnt] "d" (9),
+			[uartPin] "I" (_SFR_IO_ADDR(UART_PIN)),
+			[uartBit] "I" (UART_RX_BIT)
+			:
+				"r25"
+					);
 #else
-  while(!(UART_SRA & _BV(RXC0)))
-    ;
-  if (!(UART_SRA & _BV(FE0))) {
-      /*
-       * A Framing Error indicates (probably) that something is talking
-       * to us at the wrong bit rate.  Assume that this is because it
-       * expects to be talking to the application, and DON'T reset the
-       * watchdog.  This should cause the bootloader to abort and run
-       * the application "soon", if it keeps happening.  (Note that we
-       * don't care that an invalid char is returned...)
-       */
-    watchdogReset();
-  }
-  
-  ch = UART_UDR;
+	while(!(UART_SRA & _BV(RXC0)))
+		;
+	if (!(UART_SRA & _BV(FE0))) {
+		/*
+		 * A Framing Error indicates (probably) that something is talking
+		 * to us at the wrong bit rate.  Assume that this is because it
+		 * expects to be talking to the application, and DON'T reset the
+		 * watchdog.  This should cause the bootloader to abort and run
+		 * the application "soon", if it keeps happening.  (Note that we
+		 * don't care that an invalid char is returned...)
+		 */
+		watchdogReset();
+	}
+
+	ch = UART_UDR;
 #endif
 
 #ifdef LED_DATA_FLASH
-  LED_PORT ^= _BV(LED);
+	LED_PORT ^= _BV(LED);
 #endif
 
-  return ch;
+	return ch;
 }
 
 // AVR305 equation: #define UART_B_VALUE (((F_CPU/BAUD_RATE)-23)/6)
@@ -807,73 +817,75 @@ uint8_t getch(void) {
 #error Baud rate too slow for soft UART
 #endif
 
-void uartDelay() {
-  __asm__ __volatile__ (
-    "ldi r25,%[count]\n"
-    "1:dec r25\n"
-    "brne 1b\n"
-    "ret\n"
-    ::[count] "M" (UART_B_VALUE)
-  );
+#ifdef SOFT_UART
+static void uartDelay() {
+	__asm__ __volatile__ (
+			"ldi r25,%[count]\n"
+			"1:dec r25\n"
+			"brne 1b\n"
+			"ret\n"
+			::[count] "M" (UART_B_VALUE)
+			);
+}
+#endif
+
+static void getNch(uint8_t count) {
+	do getch(); while (--count);
+	verifySpace();
 }
 
-void getNch(uint8_t count) {
-  do getch(); while (--count);
-  verifySpace();
-}
-
-void verifySpace() {
-  if (getch() != CRC_EOP) {
-    watchdogConfig(WATCHDOG_32MS);    // shorten WD timeout
-    while (1)			      // and busy-loop so that WD causes
-      ;				      //  a reset and app start.
-  }
-  putch(STK_INSYNC);
+static void verifySpace() {
+	if (getch() != CRC_EOP) {
+		watchdogConfig(WATCHDOG_32MS);    // shorten WD timeout
+		while (1)			      // and busy-loop so that WD causes
+			;				      //  a reset and app start.
+	}
+	putch(STK_INSYNC);
 }
 
 #if LED_START_FLASHES > 0
-void flash_led(uint8_t count) {
-  do {
-    TCNT1 = -(F_CPU/(1024*16));
-    TIFR1 = _BV(TOV1);
-    while(!(TIFR1 & _BV(TOV1)));
-    LED_PORT ^= _BV(LED);
-    watchdogReset();
-  } while (--count);
+static void flash_led(uint8_t count) {
+	do {
+		TCNT1 = -(F_CPU/(1024*16));
+		TIFR1 = _BV(TOV1);
+		while(!(TIFR1 & _BV(TOV1)));
+		LED_PORT ^= _BV(LED);
+		watchdogReset();
+	} while (--count);
 }
 #endif
 
 // Watchdog functions. These are only safe with interrupts turned off.
-void watchdogReset() {
-  __asm__ __volatile__ (
-    "wdr\n"
-  );
+static void watchdogReset() {
+	__asm__ __volatile__ (
+			"wdr\n"
+			);
 }
 
 void watchdogConfig(uint8_t x) {
 #if 1
-  WDTCSR = _BV(WDCE) | _BV(WDE);
-  WDTCSR = x;
+	WDTCSR = _BV(WDCE) | _BV(WDE);
+	WDTCSR = x;
 #endif
 }
 
-void appStart(uint8_t rstFlags) {
-  // save the reset flags in the designated register
-  //  This can be saved in a main program by putting code in .init0 (which
-  //  executes before normal c init code) to save R2 to a global variable.
-  __asm__ __volatile__ ("mov r2, %0\n" :: "r" (rstFlags));
+static void appStart(uint8_t rstFlags) {
+	// save the reset flags in the designated register
+	//  This can be saved in a main program by putting code in .init0 (which
+	//  executes before normal c init code) to save R2 to a global variable.
+	__asm__ __volatile__ ("mov r2, %0\n" :: "r" (rstFlags));
 
-  watchdogConfig(WATCHDOG_OFF);
-  __asm__ __volatile__ (
+	watchdogConfig(WATCHDOG_OFF);
+	__asm__ __volatile__ (
 #ifdef VIRTUAL_BOOT_PARTITION
-    // Jump to WDT vector
-    "ldi r30,0x0c\n"
-    "clr r31\n"
+			// Jump to WDT vector
+			"ldi r30,0x0c\n"
+			"clr r31\n"
 #else
-    // Jump to RST vector
-    "clr r30\n"
-    "clr r31\n"
+			// Jump to RST vector
+			"clr r30\n"
+			"clr r31\n"
 #endif
-    "ijmp\n"
-  );
+			"ijmp\n"
+			);
 }
