@@ -17,7 +17,7 @@
   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 */
 #include <avr/wdt.h>
-//#include <Arduino.h>
+#include <Arduino.h>
 #include <wiring_private.h>
 
 // Declared weak in Arduino.h to allow user redefinitions.
@@ -329,14 +329,28 @@ void lgt8fx8x_init()
 		CLKPR = 0x01;
 	}
 #else
+
+#if defined(__LGT8F_SSOP20__)
+		GPIOR0 = PMX0 | 0x07;
+		PMX0 = 0x80;
+		PMX0 = GPIOR0;
+#endif
+	
+	// clock source settings
+	if((VDTCR & 0x0C) == 0x0C) {
+		// switch to external crystal
+		sysClock(EXT_OSC);
+	} else {
+		// clock scalar to 16MHz
+		CLKPR = 0x80;
+		CLKPR = 0x01;
+	}
+	
 	// enable 32KRC for WDT
 	GPIOR0 = PMCR | 0x10;
 	PMCR = 0x80;
 	PMCR = GPIOR0;
 
-	// clock scalar to 16MHz
-	CLKPR = 0x80;
-	CLKPR = 0x01;
 #endif
 }
 

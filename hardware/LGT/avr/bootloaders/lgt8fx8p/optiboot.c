@@ -870,12 +870,12 @@ void watchdogConfig(uint8_t x) {
 }
 
 static void appStart(uint8_t rstFlags) {
+	watchdogConfig(WATCHDOG_OFF);
 	// save the reset flags in the designated register
 	//  This can be saved in a main program by putting code in .init0 (which
 	//  executes before normal c init code) to save R2 to a global variable.
 	__asm__ __volatile__ ("mov r2, %0\n" :: "r" (rstFlags));
 
-	watchdogConfig(WATCHDOG_OFF);
 	__asm__ __volatile__ (
 #ifdef VIRTUAL_BOOT_PARTITION
 			// Jump to WDT vector

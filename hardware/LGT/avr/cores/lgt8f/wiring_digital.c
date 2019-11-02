@@ -346,7 +346,7 @@ void pwmWrite(uint8_t pin, uint16_t val)
 			#endif			
 			sbi(DDRB, PB1);
 			break;
-		#if defined(__LGT8FX8P__)
+		#if defined(__LGT8FX8P48__) || defined(__LGT8FX8P32__)
 			// F5 for LGT8F328P/QFP48
 			// E5 for LGT8F328P/QFP32 (tied with F5)
 		case TIMER1AX: 

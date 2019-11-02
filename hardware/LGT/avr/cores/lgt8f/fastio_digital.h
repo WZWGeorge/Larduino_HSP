@@ -410,20 +410,24 @@
 #endif
 
 
-#define fastioMode(pin, dir) do {\
+#define _fastioMode(pin, dir) do {\
 	if((dir & INPUT_PULLUP) == INPUT_PULLUP) _FIO_PORT_##pin |= (1 << _FIO_BIT_##pin);\
     if(dir == OUTPUT) _FIO_DDR_##pin |= (1 << _FIO_BIT_##pin);\
     else _FIO_DDR_##pin &= ~(1 << _FIO_BIT_##pin); \
 } while(0)
+#define fastioMode(pin, dir) _fastioMode(pin, dir)
 
-#define fastioWrite(pin, val) do {\
+#define _fastioWrite(pin, val) do {\
 	_FIO_PORT_##pin = (_FIO_PORT_##pin & ~(1 << _FIO_BIT_##pin)) | (val << _FIO_BIT_##pin);\
 } while(0)
+#define fastioWrite(pin, val) _fastioWrite(pin, val)
 
-#define fastioRead(pin) ((_FIO_PIN_##pin >> _FIO_BIT_##pin) & 0x1)
+#define _fastioRead(pin) ((_FIO_PIN_##pin >> _FIO_BIT_##pin) & 0x1)
+#define fastioRead(pin) _fastioRead(pin)
 
-#define fastioToggle(pin) do {\
+#define _fastioToggle(pin) do {\
 	_FIO_PIN_##pin = (1 << _FIO_BIT_##pin);\
 } while(0)
+#define fastioToggle(pin) _fastioToggle(pin)
 
 #endif

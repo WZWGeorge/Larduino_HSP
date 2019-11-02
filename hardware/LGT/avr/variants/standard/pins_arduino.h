@@ -66,6 +66,8 @@ static const uint8_t SCK  = PIN_SPI_SCK;
 static const uint8_t SDA = PIN_WIRE_SDA;
 static const uint8_t SCL = PIN_WIRE_SCL;
 
+#define LED_BUILTIN 	D13
+
 #define PIN_A0   (14)
 #define PIN_A1   (15)
 #define PIN_A2   (16)
@@ -171,11 +173,12 @@ static const uint8_t A11 = 26;
 #define E5	25
 #define E6	26
 
-#define D22	22 	/* PE0 */
+#define D22	22 	/* PB6 */
 #define D23	23	/* PE2 */
 #define D24	24	/* PE4 */
 #define D25	25	/* PE5 */
 #define D26	26	/* PE6 */
+#define D27	27	/* PB7 */
 #endif
 #endif
 
@@ -319,11 +322,12 @@ const uint8_t PROGMEM digital_pin_to_port_PGM[] = {
 	PF, /* 39 */
 	PF, /* 40 */
 #else
-	PE, /* 22 */
+	PB, /* 22 */
 	PE, /* 23 */
 	PE, /* 24 */
 	PE, /* 25 */
 	PE, /* 26 */
+	PB, /* 27 */
 #endif
 #endif
 };
@@ -373,11 +377,12 @@ const uint8_t PROGMEM digital_pin_to_bit_mask_PGM[] = {
 	_BV(7), /* 39, port F7 */
 	_BV(3), /* 40, port F3 for OC3C */
 #else
-	_BV(0), /* 22, port E0 */
+	_BV(6), /* 22, port B6 */
 	_BV(2), /* 23, port E2 */ 
 	_BV(4), /* 24, port E4 */
 	_BV(5), /* 25, port E5 */
 	_BV(6), /* 26, port E6 */
+	_BV(7), /* 27, port B7 */
 #endif
 #endif
 };
@@ -456,11 +461,12 @@ const uint8_t PROGMEM digital_pin_to_timer_PGM[] = {
 	TIMER3C,	  /* 40 - F3 for OC3C */
 	TIMER3AA,	  /* 41 - OC3A/ACO */
 #elif defined(__LGT8FX8P32__)
-	NOT_ON_TIMER, /* 22 - E0 */
+	NOT_ON_TIMER, /* 22 - B6 */
 	NOT_ON_TIMER, /* 23 - E2 */
 	TIMER1BX,	  /* 24 - E4 */
 	TIMER1AX,	  /* 25 - E5 */
 	NOT_ON_TIMER, /* 26 - E6 */		
+	NOT_ON_TIMER, /* 27 - B7 */		
 #endif
 // Log(HSP v3.7): END
 };
